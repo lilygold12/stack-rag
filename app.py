@@ -1,8 +1,5 @@
 from fastapi import FastAPI
 import sqlite3
-import time
-from typing import List
-import hashlib
 import io
 from typing import List
 from fastapi import UploadFile, File
@@ -29,10 +26,17 @@ app = FastAPI()
 def read_root():
     return {"message": "FastAPI test"}
 
+
 # ingest endpoint
 @app.post("/ingest")
 async def ingest(file: UploadFile = File(...)):
     data = await file.read()
     reader = PdfReader(io.BytesIO(data))
     text = " ".join([page.extract_text() or "" for page in reader.pages])
-    return {"filename": file.filename, "text": text[:500]}
+    chunks = text_chunks(text)
+
+    return {
+        "filename": file.filename,
+        "num_chunks": len(chunks),
+        "first_chunk": chunks[0] if chunks else ""
+    }
