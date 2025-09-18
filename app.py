@@ -7,7 +7,7 @@ from PyPDF2 import PdfReader
 import requests
 import os
 
-MISTRAL_API_KEY = "kPg3un3taQ1yTpIn2RDtWYnOMDFpooBP"
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 DB_PATH = "rag.db"
 app = FastAPI()
 
@@ -58,12 +58,44 @@ def text_chunks(text: str, words_per_chunk: int = 500):
     return out
 
 
+# Help find places in the text that have most overlap with query
+def overlap_score(q: str, text: str) -> float:
+    q_tokens = set(tokenize(q))
+    t_tokens = set(tokenize(text))
+    if not q_tokens:
+        return 0.0
+    return len(q_tokens & t_tokens) / len(q_tokens)
+
+
+# Words in query to ignore
+CUT = {"a","an","and","are","for","from","i","if","is","it","its","of","or","that","the","there","this","to","with"}
+
+
+# Help tokenize the query
+def tokenize(s: str):
+    out, w = [], []
+    for ch in s.lower():
+        if ch.isalnum():
+            w.append(ch)
+        else:
+            if w:
+                tok = "".join(w)
+                if tok not in CUT:
+                    out.append(tok)
+                w = []
+    if w:
+        tok = "".join(w)
+        if tok not in CUT:
+            out.append(tok)
+    return out
+
+
 @app.get("/")
 def read_root():
     return {"message": "FastAPI test"}
 
 
-# ingest endpoint
+# Ingest endpoint
 @app.post("/ingest")
 async def ingest(file: UploadFile = File(...)):
     # Read file, extract text, and split into chunks
@@ -92,21 +124,39 @@ async def ingest(file: UploadFile = File(...)):
 # Query endpoint
 @app.post("/query")
 def query(q: str):
+    # Detect if knowledge search is necessary
+    if q.lower() in {"hi", "hello", "thanks", "thank you", "ok"}:
+        return {"answer": "Hello! Upload your PDFs, then ask a question."}
+
+    # Get all chunks
     con = get_db()
     cur = con.cursor()
-
-    # Find top 3 chunks that contain the query text
-    cur.execute("SELECT doc_id, text FROM chunks WHERE text LIKE ? LIMIT 3", (f"%{q}%",))
+    cur.execute("SELECT doc_id, text FROM chunks")
     rows = cur.fetchall()
     con.close()
 
     if not rows:
-        return {"answer": "No matching text found."}
+        return {"answer": "Please upload a PDF."}
 
+    # Determine word overlap between query and chunk
+    scored = []
+    for doc_id, txt in rows:
+        s = overlap_score(q,txt)
+        if s > 0:
+            scored.append((s, doc_id, txt))
 
-    context = "\n\n".join([r[0] for r in rows])
+    if not scored:
+        return {"answer": "Insufficient evidence."}
+
+    # Find top 3 chunks by overlap score
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top = scored[:3]
+    context = "\n\n".join([t[2] for t in top])
 
     # Add LLM prompt and call Mistral API
+    if not MISTRAL_API_KEY:
+        return {"error": "Missing MISTRAL_API_KEY"}
+
     prompt = f"Answer the question using only the text below. If not enough information say 'Insufficient evidence'.\n\nContext:\n{context}\n\nQuestion: {q}"
 
     resp = requests.post(
