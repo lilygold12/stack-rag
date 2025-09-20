@@ -3,6 +3,7 @@ import sqlite3
 import io
 from typing import List
 from fastapi import UploadFile, File
+from fastapi.responses import HTMLResponse
 from PyPDF2 import PdfReader
 import requests
 import os
@@ -168,9 +169,10 @@ def startup_event():
     init_db()
 
 
-@app.get("/")
-def read_root():
-    return {"message": "FastAPI test"}
+@app.get("/", response_class=HTMLResponse)
+def home():
+    with open("RAG-UI.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 
 # Ingest endpoint
