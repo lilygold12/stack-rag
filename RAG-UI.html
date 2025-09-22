@@ -1,0 +1,55 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>RAG</title>
+
+<input type="file" id="files" multiple accept="application/pdf">
+<button id="ingest">Ingest</button>
+
+<div style="margin:8px 0"></div>
+<textarea id="q" placeholder="Ask a question" rows="5" cols="60"></textarea>
+<br>
+<button id="ask">Ask</button>
+
+<pre id="out"></pre>
+
+<script>
+  const base = location.origin;
+  const $ = id => document.getElementById(id);
+  const out = $("out");
+
+  $("ingest").onclick = async () => {
+    const fs = $("files").files;
+    if (!fs || fs.length === 0) { out.textContent = "Pick PDFs first."; return; }
+    const form = new FormData();
+    for (const f of fs) form.append('files', f, f.name);
+    try {
+      const r = await fetch(base + '/ingest', { method: 'POST', body: form });
+      const data = await r.json();
+      if (data.ingested) {
+        out.textContent = "Ingested:\n" + data.ingested.map(x => x.filename).join("\n");
+      } else {
+        out.textContent = JSON.stringify(data, null, 2);
+      }
+    } catch (e) { out.textContent = 'Error: ' + e; }
+  };
+
+  $("ask").onclick = async () => {
+    const q = $("q").value.trim();
+    if (!q) return;
+    const topk = 3;
+    const alpha = 0.7;
+    try {
+      const url = new URL(base + '/query');
+      url.searchParams.set('q', q);
+      url.searchParams.set('top_k', topk);
+      url.searchParams.set('alpha', alpha);
+      const r = await fetch(url, { method: 'POST' });
+      const data = await r.json();
+      if (data.answer) {
+        out.textContent = "Answer:\n" + data.answer;
+      } else {
+        out.textContent = JSON.stringify(data, null, 2);
+      }
+    } catch (e) { out.textContent = 'Error: ' + e; }
+  };
+</script>
